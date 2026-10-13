@@ -8,7 +8,9 @@
 
 The ESP32 IoT-Based 3-Phase Induction Motor Monitoring and Protection System is designed to monitor the operating condition of an industrial motor in real time. It measures important parameters such as voltage, current, temperature, and vibration to identify abnormal operating conditions.
 The system uses an ESP32 microcontroller to collect sensor readings and send the data to the ThingSpeak IoT platform. A web-based dashboard displays the readings, gauges, historical graphs, and motor status. The system can also detect faults and provide alerts.
-##THE MAIN WORKING OF CODE:
+
+
+**##THE MAIN WORKING OF CODE:
 
 1)HTML — Structure of the Dashboard
 HTML creates the basic structure of the webpage. In this project, it defines the dashboard title, sensor cards, gauges, graphs, warning banner, and motor-status indicators.
@@ -77,5 +79,5 @@ Connect the ESP32 to Wi-Fi and upload firmware that sends readings to the same T
 Check that the readings appear on the dashboard.
 
 <img width="1525" height="728" alt="Dashboard" src="https://github.com/user-attachments/assets/0a288b1f-44e4-403b-b3f6-d2de27a5f812" />
-
+**
 
