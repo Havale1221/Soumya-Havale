@@ -4,7 +4,6 @@ Industrial Health Monitoring System Using IOT System
 
 
 
-
 The ESP32 IoT-Based 3-Phase Induction Motor Monitoring and Protection System is designed to monitor the operating condition of an industrial motor in real time. It measures important parameters such as voltage, current, temperature, and vibration to identify abnormal operating conditions.
 The system uses an ESP32 microcontroller to collect sensor readings and send the data to the ThingSpeak IoT platform. A web-based dashboard displays the readings, gauges, historical graphs, and motor status. The system can also detect faults and provide alerts.
 
