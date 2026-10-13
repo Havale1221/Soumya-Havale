@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+  
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Motor Monitoring Dashboard</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; padding:20px; font-family: Arial, sans-serif;
+         background:#0f172a; color:#e2e8f0; }
+  h1 { margin:0 0 14px; font-size:24px; }
+  .banner { padding:14px; border-radius:10px; font-weight:bold;
+            font-size:18px; text-align:center; margin-bottom:18px;
+            background:#334155; }
+  .banner.ok { background:#166534; }
+  .banner.bad { background:#991b1b; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity:.6; } }
+  .grid { display:grid; gap:16px; margin-bottom:18px;
+          grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .card { background:#1e293b; border-radius:12px; padding:14px;
+          text-align:center; }
+  .card h3 { margin:0 0 6px; font-size:15px; color:#94a3b8; }
+  .value { font-size:26px; font-weight:bold; margin-top:-6px; }
+  .limit { font-size:12px; color:#94a3b8; margin-top:4px; }
+  svg { width:100%; max-width:200px; }
+  .lamps { display:grid; gap:16px; margin-bottom:18px;
+           grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .lamp { background:#283242; border-radius:12px; padding:14px;
+          text-align:center; }
+  .dot { width:34px; height:34px; border-radius:50%; margin:0 auto 8px;
+         background:#475569; }
+  .dot.green { background:#22c55e; box-shadow:0 0 14px #22c55e; }
+  .dot.red   { background:#ef4444; box-shadow:0 0 14px #ef4444; }
+  canvas { width:100%; height:140px; }
+  #updated { text-align:center; color:#94a3b8; font-size:13px; }
+</style>
+</head>
+<body>
+
+<h1>⚙️ 3-Phase Motor Monitoring Dashboard</h1>
+<div id="banner" class="banner">Loading data...</div>
+
+<div class="grid" id="gauges"></div>
+<div class="lamps" id="lamps"></div>
+<div class="grid" id="charts"></div>
+<p id="updated"></p>
+
+<script>
+// ================= EDIT THESE =================
+const CHANNEL_ID   = "YOUR_CHANNEL_ID";
+const READ_API_KEY = "";      // leave empty if the channel is public
+const REFRESH_MS   = 15000;   // 15 seconds
+// ==============================================
+
+// field numbers match the ESP32 code
+const SENSORS = [
+  { f:1, name:"Voltage",     unit:"V",  max:300, limit:250, color:"#fbbf24" },
+  { f:2, name:"Current",     unit:"A",  max:15,  limit:10,  color:"#38bdf8" },
+  { f:3, name:"Temperature", unit:"°C", max:100, limit:80,  color:"#fb7185" },
+  { f:4, name:"Vibration",   unit:"",   max:3.3, limit:2.5, color:"#a78bfa" }
+];
+
+const LAMPS = [
+  { f:5, name:"Fault",       onClass:"red"   },
+  { f:6, name:"Motor Running", onClass:"green" },
+  { f:7, name:"Buzzer",      onClass:"red"   }
+];
+
+// ---------- build the page ----------
+const gaugesDiv = document.getElementById("gauges");
+const chartsDiv = document.getElementById("charts");
+const lampsDiv  = document.getElementById("lamps");
+
+SENSORS.forEach(s => {
+  gaugesDiv.innerHTML += `
+    <div class="card">
+      <h3>${s.name}</h3>
+      <svg viewBox="0 0 120 70">
+        <path d="M10 60 A50 50 0 0 1 110 60" fill="none"
+              stroke="#334155" stroke-width="10" stroke-linecap="round"/>
+        <path id="g${s.f}" d="M10 60 A50 50 0 0 1 110 60" fill="none"
+              stroke="#22c55e" stroke-width="10" stroke-linecap="round"
+              pathLength="100" stroke-dasharray="0 100"/>
+      </svg>
+      <div class="value" id="v${s.f}">--</div>
+      <div class="limit">Limit: ${s.limit} ${s.unit}</div>
+    </div>`;
+  chartsDiv.innerHTML += `
+    <div class="card">
+      <h3>${s.name} (history)</h3>
+      <canvas id="c${s.f}"></canvas>
+    </div>`;
+});
+
+LAMPS.forEach(l => {
+  lampsDiv.innerHTML += `
+    <div class="lamp">
+      <div class="dot" id="l${l.f}"></div>
+      <div>${l.name}</div>
+    </div>`;
+});
+
+// ---------- draw a simple line chart ----------
+function drawChart(cv, vals, color, limit) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const c = cv.getContext("2d");
+  c.scale(dpr, dpr);
+  c.clearRect(0, 0, w, h);
+  if (vals.length < 2) return;
+
+  const mx = Math.max(...vals, limit) * 1.1;
+  const mn = Math.min(...vals, 0);
+  const X = i => 10 + i * (w - 20) / (vals.length - 1);
+  const Y = v => h - 10 - (v - mn) / ((mx - mn) || 1) * (h - 20);
+
+  // red dashed limit line
+  c.strokeStyle = "#ef4444"; c.lineWidth = 1; c.setLineDash([5, 4]);
+  c.beginPath(); c.moveTo(10, Y(limit)); c.lineTo(w - 10, Y(limit)); c.stroke();
+  c.setLineDash([]);
+
+  // data line
+  c.strokeStyle = color; c.lineWidth = 2; c.beginPath();
+  vals.forEach((v, i) => i ? c.lineTo(X(i), Y(v)) : c.moveTo(X(i), Y(v)));
+  c.stroke();
+}
+
+// ---------- fetch data from ThingSpeak ----------
+async function update() {
+  const banner = document.getElementById("banner");
+  try {
+    let url = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?results=40`;
+    if (READ_API_KEY) url += `&api_key=${READ_API_KEY}`;
+
+    const res  = await fetch(url);
+    const data = await res.json();
+    const feeds = data.feeds || [];
+    if (feeds.length === 0) { banner.textContent = "No data yet"; return; }
+
+    const last = feeds[feeds.length - 1];
+    const num  = (feed, f) => parseFloat(feed["field" + f]);
+
+    // gauges + charts
+    SENSORS.forEach(s => {
+      const v = num(last, s.f);
+      const pct = Math.max(0, Math.min(100, (v / s.max) * 100));
+      const bad = v > s.limit || (s.f === 1 && v < 180);
+      const g = document.getElementById("g" + s.f);
+      g.setAttribute("stroke-dasharray", pct + " 100");
+      g.setAttribute("stroke", bad ? "#ef4444" : "#22c55e");
+      document.getElementById("v" + s.f).textContent =
+        (isNaN(v) ? "--" : v.toFixed(2)) + " " + s.unit;
+
+      const vals = feeds.map(fd => num(fd, s.f)).filter(x => !isNaN(x));
+      drawChart(document.getElementById("c" + s.f), vals, s.color, s.limit);
+    });
+
+    // lamps
+    LAMPS.forEach(l => {
+      const on = num(last, l.f) === 1;
+      document.getElementById("l" + l.f).className =
+        "dot" + (on ? " " + l.onClass : "");
+    });
+
+    // banner
+    const fault = num(last, 6) === 1;
+    banner.className = "banner " + (fault ? "bad" : "ok");
+    banner.textContent = fault
+      ? "⚠️ FAULT DETECTED - MOTOR STOPPED - BUZZER ON"
+      : "✅ MOTOR RUNNING - ALL PARAMETERS NORMAL";
+
+    document.getElementById("updated").textContent =
+      "Last update: " + new Date(last.created_at).toLocaleString();
+
+  } catch (e) {
+    banner.className = "banner";
+    banner.textContent = "Cannot load data. Check Channel ID, API key and internet.";
+  }
+}
+
+update();
+setInterval(update, REFRESH_MS);
+</script>
+</body>
+</html>
